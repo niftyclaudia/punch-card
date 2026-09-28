@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Punch Card</title>
+<meta name="description" content="A marathon training calendar you punch like a card. Press and hold a day; the piece falls into a pile that rolls when you tilt your phone.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Punch Card">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Big+Shoulders+Display:wght@900&family=Source+Sans+3:wght@400;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<style>
+:root{--ink:#15201A;--muted:#4F5C55;--faint:rgba(21,32,26,.42);--line:rgba(21,32,26,.22);--green:#1E7A4B;--backing:#FBF8F1;--paper:#ECE4D6}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 "Source Sans 3",system-ui,sans-serif;transition:background-color .25s ease}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.app{max-width:430px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+main{flex:1;display:flex;flex-direction:column;padding:16px 20px 8px;position:relative;touch-action:pan-y}
+header{display:flex;flex-direction:column;gap:4px}
+.meta{color:var(--muted);font-size:15px}
+.label{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.topline{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.links{display:flex;gap:14px}
+.linkbtn{border:0;background:none;padding:4px 0;cursor:pointer;white-space:nowrap;font-size:15px;font-weight:600;text-decoration:underline;text-underline-offset:4px}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;margin:14px -6px 0;padding-bottom:10px;border-bottom:2px solid var(--ink)}
+.tabs::-webkit-scrollbar{display:none}
+.tab{border:0;background:none;padding:6px 8px;min-height:36px;cursor:pointer;font:700 20px/1 "Barlow Condensed",sans-serif;letter-spacing:.02em;border-radius:999px;white-space:nowrap}
+.tab[aria-current="true"]{background:var(--ink);color:var(--paper)}
+.grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));column-gap:6px;row-gap:8px;margin-top:14px}
+.wd{text-align:center;color:var(--faint);font-size:13px;font-weight:700;letter-spacing:.1em;padding-bottom:2px}
+.cell{border:0;background:none;padding:0;display:block;cursor:pointer;position:relative;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+.cell[disabled]{cursor:default}
+.cell .dot{width:100%;aspect-ratio:1;position:relative;display:block}
+.cell .dot svg{width:100%;height:100%;display:block;overflow:visible;transition:transform .12s ease}
+.cell.sel .dot::after{content:"";position:absolute;inset:-5px;border:2px dashed var(--ink);border-radius:50%}
+.spacer{flex:1;min-height:24px}
+.mo{font:900 96px/.78 "Big Shoulders Display","Barlow Condensed",sans-serif;letter-spacing:-.02em;margin:0;white-space:nowrap;text-transform:uppercase;width:max-content;max-width:100%}
+#pile{position:fixed;left:0;top:0;pointer-events:none;z-index:3}
+.logbar{display:none}
+@media (min-width:700px) and (pointer:fine){.logbar{display:block;position:sticky;bottom:calc(52px + env(safe-area-inset-bottom,12px));padding:14px 0 10px;background:var(--paper);z-index:3}}
+.pill{display:flex;align-items:center;justify-content:center;width:100%;background:var(--ink);color:var(--paper);border:0;border-radius:999px;padding:14px 24px;font-weight:700;font-size:17px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+.pill[disabled]{opacity:.35;cursor:not-allowed}
+.hint{margin:0;text-align:center;font-weight:700;font-size:15px;letter-spacing:.08em;text-transform:uppercase;padding:14px 0}
+#syncstatus{font-size:14px;color:var(--muted);text-align:center;min-height:20px}
+footer{font-size:12px;color:var(--muted);text-align:center;padding:0 16px 8px}
+footer a{color:inherit}
+nav{position:sticky;bottom:0;display:grid;grid-template-columns:repeat(3,1fr);background:var(--paper);border-top:1px solid var(--line);padding:0 8px env(safe-area-inset-bottom,12px);z-index:4}
+nav a,nav button{font:inherit;font-size:15px;font-weight:600;color:var(--muted);background:none;border:0;min-height:52px;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none}
+nav [aria-current=page]{color:var(--ink);font-weight:700;box-shadow:inset 0 2px 0 var(--green)}
+/* day panel: a bottom sheet inside the column */
+.scrim{position:fixed;inset:0;background:rgba(21,32,26,.32);opacity:0;pointer-events:none;transition:opacity .2s;z-index:5}
+.scrim.on{opacity:1;pointer-events:auto}
+.panel{position:fixed;left:50%;bottom:0;width:100%;max-width:430px;max-height:88%;overflow:auto;background:var(--paper);border-top:2px solid var(--ink);
+  padding:16px 20px calc(16px + env(safe-area-inset-bottom,0px));transform:translate(-50%,105%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:grid;gap:16px;z-index:6}
+.panel.open{transform:translate(-50%,0)}
+.ph{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start}
+.ph h1{margin:0;font:700 44px/1 "Barlow Condensed",sans-serif;text-transform:uppercase}
+.ph .when{display:grid;gap:2px;margin-top:4px}
+.preview{width:88px;height:88px}
+.preview svg{width:100%;height:100%;overflow:visible}
+.close{border:0;background:none;padding:4px 0;cursor:pointer;justify-self:start}
+.ask{font-size:17px;font-weight:600;margin:0}
+.days7{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.days7 button{border:1px solid var(--line);background:none;padding:8px 0;font-weight:700;font-size:15px;cursor:pointer;border-radius:999px;display:grid;justify-items:center;gap:4px}
+.days7 button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.days7 i{display:flex;gap:2px;height:6px}
+.days7 i span{width:6px;height:6px;border-radius:50%}
+.rows{display:grid;gap:6px}
+.row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border:1px solid var(--line);padding:10px 12px;min-height:52px;cursor:pointer;background:transparent;text-align:left;width:100%;border-radius:10px}
+.row[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.row .sw{width:22px;height:22px;border-radius:50%;border:2.5px solid var(--c)}
+.panel.log .row[aria-pressed="true"] .sw{background:var(--c)}
+.row .nm{font-weight:700;font-size:17px}
+.row .sub{display:block;font-size:14px;color:var(--muted)}
+.row .check{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.row[aria-pressed="true"] .check{color:var(--ink)}
+.fields{display:flex;gap:8px;padding:2px 0 8px 46px;flex-wrap:wrap}
+.fields label{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:14px;color:var(--muted)}
+.fields input{width:76px;font:inherit;font-size:17px;font-weight:600;color:var(--ink);background:var(--backing);border:1px solid var(--line);padding:6px 8px;border-radius:8px;font-variant-numeric:tabular-nums}
+.actions{display:grid;gap:6px;position:sticky;bottom:calc(-16px - env(safe-area-inset-bottom,0px));background:var(--paper);padding-block:12px calc(4px + env(safe-area-inset-bottom,0px))}
+.ghost{background:none;border:0;padding:10px;font-weight:700;font-size:14px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;text-decoration:underline;text-underline-offset:4px}
+.note{font-size:14px;color:var(--muted);margin:0;text-align:center}
+.toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);border-radius:999px;padding:10px 10px 10px 20px;display:flex;gap:12px;align-items:center;font-weight:600;font-size:15px;z-index:7;white-space:nowrap}
+.toast button{background:var(--paper);color:var(--ink);border:0;border-radius:999px;padding:8px 16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:13px;cursor:pointer}
+.toast[hidden],.undo[hidden],[hidden]{display:none!important}
+.disc{position:absolute;inset:0;border-radius:50%;pointer-events:none;z-index:2}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style></head>
+<body><div class="app">
+<main id="sheet">
+  <header>
+    <div class="topline"><span class="meta" id="meta"></span><span class="links"><button class="linkbtn" id="tiltbtn" type="button" hidden>Turn on tilt</button><button class="linkbtn" id="usual" type="button">Usual week</button></span></div>
+  </header>
+  <div class="tabs" id="tabs" role="group" aria-label="Month"></div>
+  <div class="grid" id="grid"></div>
+  <div class="spacer"></div>
+  <h2 class="mo" id="mo"></h2>
+  <canvas id="pile" aria-hidden="true"></canvas>
+  <div class="logbar" id="logbar"></div>
+</main>
+<footer id="foot">A prototype by <a href="https://github.com/niftyclaudia/punch-card">Claudia Alban</a> · made-up workouts, saved only in this browser</footer>
+<nav aria-label="Demo"><button type="button" data-mode="sample">October</button><button type="button" data-mode="race">Race day</button><button type="button" data-mode="fresh">Start fresh</button></nav>
+</div>
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" aria-label="Day"></aside>
+<div class="toast" id="toast" hidden><span id="toastMsg"></span><button class="undo" id="undo" type="button">Undo</button></div>
+
+<script>
+const DEMOS = {"sample":{"today":"2026-10-31","start":"2026-09-28","race":"2027-03-21","raceName":"race day","week":4,"garmin":{"2026-10-27":[{"a":"run","min":62,"mi":6.0},{"a":"pilates","min":20}],"2026-10-28":[{"a":"run","min":48,"mi":5.0}],"2026-10-29":[{"a":"run","min":64,"mi":6.0}],"2026-10-30":[{"a":"climb","min":70}]},"plan":{"2026-09-28":[{"a":"run","min":60}],"2026-09-30":[{"a":"run","min":60}],"2026-10-03":[{"a":"run","mi":7,"min":70}],"2026-10-04":[{"a":"run","min":60}],"2026-10-05":[{"a":"run","mi":3,"min":30}],"2026-10-06":[{"a":"run","min":60}],"2026-10-07":[{"a":"run","mi":4,"min":40}],"2026-10-08":[{"a":"run","mi":4,"min":40}],"2026-10-10":[{"a":"run","mi":10,"min":100}],"2026-10-11":[{"a":"run","mi":3,"min":30}],"2026-10-12":[{"a":"run","mi":3,"min":30}],"2026-10-13":[{"a":"run","min":60}],"2026-10-14":[{"a":"run","mi":4,"min":40}],"2026-10-15":[{"a":"run","mi":4,"min":40}],"2026-10-17":[{"a":"run","mi":12,"min":120}],"2026-10-18":[{"a":"run","mi":3,"min":30}],"2026-10-19":[{"a":"run","mi":4,"min":40}],"2026-10-20":[{"a":"run","min":60}],"2026-10-21":[{"a":"run","mi":5,"min":50}],"2026-10-22":[{"a":"run","mi":5,"min":50}],"2026-10-24":[{"a":"run","mi":12,"min":120}],"2026-10-25":[{"a":"run","mi":4,"min":40}],"2026-10-26":[{"a":"run","mi":4,"min":40}],"2026-10-27":[{"a":"run","min":60}],"2026-10-28":[{"a":"run","mi":5,"min":50}],"2026-10-29":[{"a":"run","mi":6,"min":60}],"2026-10-31":[{"a":"run","mi":14,"min":140}],"2026-11-01":[{"a":"run","mi":4,"min":40}],"2026-11-02":[{"a":"run","mi":5,"min":50}],"2026-11-03":[{"a":"run","min":60}],"2026-11-04":[{"a":"run","mi":6,"min":60}],"2026-11-05":[{"a":"run","mi":6,"min":60}],"2026-11-07":[{"a":"run","mi":14,"min":140}],"2026-11-08":[{"a":"run","mi":5,"min":50}],"2026-11-09":[{"a":"run","mi":3,"min":30}],"2026-11-10":[{"a":"run","min":60}],"2026-11-11":[{"a":"run","mi":5,"min":50}],"2026-11-12":[{"a":"run","mi":5,"min":50}],"2026-11-14":[{"a":"run","mi":10,"min":100}],"2026-11-15":[{"a":"run","mi":4,"min":40}],"2026-11-16":[{"a":"run","mi":5,"min":50}],"2026-11-17":[{"a":"run","min":60}],"2026-11-18":[{"a":"run","mi":6,"min":60}],"2026-11-19":[{"a":"run","mi":7,"min":70}],"2026-11-21":[{"a":"run","mi":16,"min":160}],"2026-11-22":[{"a":"run","mi":5,"min":50}],"2026-11-23":[{"a":"run","mi":6,"min":60}],"2026-11-24":[{"a":"run","min":60}],"2026-11-25":[{"a":"run","mi":6,"min":60}],"2026-11-26":[{"a":"run","mi":7,"min":70}],"2026-11-28":[{"a":"run","mi":16,"min":160}],"2026-11-29":[{"a":"run","mi":5,"min":50}],"2026-11-30":[{"a":"run","mi":4,"min":40}],"2026-12-01":[{"a":"run","min":60}],"2026-12-02":[{"a":"run","mi":5,"min":50}],"2026-12-03":[{"a":"run","mi":5,"min":50}],"2026-12-05":[{"a":"run","mi":12,"min":120}],"2026-12-06":[{"a":"run","mi":4,"min":40}],"2026-12-07":[{"a":"run","mi":6,"min":60}],"2026-12-08":[{"a":"run","min":60}],"2026-12-09":[{"a":"run","mi":6,"min":60}],"2026-12-10":[{"a":"run","mi":8,"min":80}],"2026-12-12":[{"a":"run","mi":18,"min":180}],"2026-12-13":[{"a":"run","mi":5,"min":50}],"2026-12-14":[{"a":"run","mi":6,"min":60}],"2026-12-15":[{"a":"run","min":60}],"2026-12-16":[{"a":"run","mi":6,"min":60}],"2026-12-17":[{"a":"run","mi":8,"min":80}],"2026-12-19":[{"a":"run","mi":18,"min":180}],"2026-12-20":[{"a":"run","mi":5,"min":50}],"2026-12-21":[{"a":"run","mi":5,"min":50}],"2026-12-22":[{"a":"run","min":60}],"2026-12-23":[{"a":"run","mi":5,"min":50}],"2026-12-24":[{"a":"run","mi":6,"min":60}],"2026-12-26":[{"a":"run","mi":12,"min":120}],"2026-12-27":[{"a":"run","mi":4,"min":40}],"2026-12-28":[{"a":"run","mi":6,"min":60}],"2026-12-29":[{"a":"run","min":60}],"2026-12-30":[{"a":"run","mi":6,"min":60}],"2026-12-31":[{"a":"run","mi":9,"min":90}],"2027-01-02":[{"a":"run","mi":22,"min":220}],"2027-01-03":[{"a":"run","mi":5,"min":50}],"2027-01-04":[{"a":"run","mi":7,"min":70}],"2027-01-05":[{"a":"run","min":60}],"2027-01-06":[{"a":"run","mi":6,"min":60}],"2027-01-07":[{"a":"run","mi":9,"min":90}],"2027-01-09":[{"a":"run","mi":20,"min":200}],"2027-01-10":[{"a":"run","mi":5,"min":50}],"2027-01-11":[{"a":"run","mi":6,"min":60}],"2027-01-12":[{"a":"run","min":60}],"2027-01-13":[{"a":"run","mi":5,"min":50}],"2027-01-14":[{"a":"run","mi":7,"min":70}],"2027-01-16":[{"a":"run","mi":12,"min":120}],"2027-01-17":[{"a":"run","mi":4,"min":40}],"2027-01-18":[{"a":"run","mi":7,"min":70}],"2027-01-19":[{"a":"run","min":60}],"2027-01-20":[{"a":"run","mi":6,"min":60}],"2027-01-21":[{"a":"run","mi":10,"min":100}],"2027-01-23":[{"a":"run","mi":22,"min":220}],"2027-01-24":[{"a":"run","mi":5,"min":50}],"2027-01-25":[{"a":"run","mi":7,"min":70}],"2027-01-26":[{"a":"run","min":60}],"2027-01-27":[{"a":"run","mi":6,"min":60}],"2027-01-28":[{"a":"run","mi":10,"min":100}],"2027-01-30":[{"a":"run","mi":18,"min":180}],"2027-01-31":[{"a":"run","mi":5,"min":50}],"2027-02-01":[{"a":"run","mi":6,"min":60}],"2027-02-02":[{"a":"run","min":60}],"2027-02-03":[{"a":"run","mi":5,"min":50}],"2027-02-04":[{"a":"run","mi":8,"min":80}],"2027-02-06":[{"a":"run","mi":12,"min":120}],"2027-02-07":[{"a":"run","mi":4,"min":40}],"2027-02-08":[{"a":"run","mi":7,"min":70}],"2027-02-09":[{"a":"run","min":60}],"2027-02-10":[{"a":"run","mi":6,"min":60}],"2027-02-11":[{"a":"run","mi":12,"min":120}],"2027-02-13":[{"a":"run","mi":20,"min":200}],"2027-02-14":[{"a":"run","mi":5,"min":50}],"2027-02-15":[{"a":"run","mi":7,"min":70}],"2027-02-16":[{"a":"run","min":60}],"2027-02-17":[{"a":"run","mi":6,"min":60}],"2027-02-18":[{"a":"run","mi":12,"min":120}],"2027-02-20":[{"a":"run","mi":24,"min":240}],"2027-02-21":[{"a":"run","mi":5,"min":50}],"2027-02-22":[{"a":"run","mi":6,"min":60}],"2027-02-23":[{"a":"run","min":60}],"2027-02-24":[{"a":"run","mi":5,"min":50}],"2027-02-25":[{"a":"run","mi":10,"min":100}],"2027-02-27":[{"a":"run","mi":12,"min":120}],"2027-02-28":[{"a":"run","mi":4,"min":40}],"2027-03-01":[{"a":"run","mi":7,"min":70}],"2027-03-02":[{"a":"run","min":60}],"2027-03-03":[{"a":"run","mi":6,"min":60}],"2027-03-04":[{"a":"run","mi":10,"min":100}],"2027-03-06":[{"a":"run","mi":16,"min":160}],"2027-03-07":[{"a":"run","mi":4,"min":40}],"2027-03-08":[{"a":"run","mi":5,"min":50}],"2027-03-09":[{"a":"run","min":60}],"2027-03-10":[{"a":"run","mi":5,"min":50}],"2027-03-11":[{"a":"run","mi":8,"min":80}],"2027-03-13":[{"a":"run","mi":10,"min":100}],"2027-03-14":[{"a":"run","mi":3,"min":30}],"2027-03-15":[{"a":"run","mi":4,"min":40}],"2027-03-16":[{"a":"run","min":60}],"2027-03-17":[{"a":"run","mi":4,"min":40}],"2027-03-18":[{"a":"run","mi":6,"min":60}],"2027-03-20":[{"a":"run","min":60}]},"state":{"days":{"2026-10-01":{"planned":[],"done":[{"a":"climb","min":80}],"punched":true},"2026-10-03":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","min":72,"mi":7.0}],"punched":true},"2026-10-04":{"planned":[{"a":"run","min":60}],"done":[{"a":"bike","min":95,"mi":25.0},{"a":"pilates","min":20}],"punched":true},"2026-10-05":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"strength","min":40},{"a":"run","min":32,"mi":3.0}],"punched":true},"2026-10-06":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","min":55,"mi":5.5}],"punched":true},"2026-10-07":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"pilates","min":50}],"punched":true},"2026-10-08":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","min":42,"mi":4.0}],"punched":true},"2026-10-09":{"planned":[],"done":[{"a":"climb","min":75}],"punched":true},"2026-10-10":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","min":100,"mi":10.0}],"punched":true},"2026-10-11":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"bike","min":120,"mi":30.0}],"punched":true},"2026-10-12":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"other","min":40,"mi":2.0}],"punched":true},"2026-10-13":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","min":50,"mi":5.0},{"a":"strength","min":35}],"punched":true},"2026-10-14":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","min":58,"mi":6.2}],"punched":true},"2026-10-15":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","min":45,"mi":4.5},{"a":"pilates","min":15}],"punched":true},"2026-10-17":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","min":122,"mi":12.0}],"punched":true},"2026-10-18":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"bike","min":90,"mi":24.0},{"a":"pilates","min":30}],"punched":true},"2026-10-19":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"strength","min":45},{"a":"run","min":35,"mi":3.5}],"punched":true},"2026-10-20":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","min":60,"mi":6.0}],"punched":true},"2026-10-21":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"pilates","min":55}],"punched":true},"2026-10-22":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","min":52,"mi":5.0}],"punched":true},"2026-10-23":{"planned":[],"done":[{"a":"climb","min":90}],"punched":true},"2026-10-24":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","min":125,"mi":12.4}],"punched":true},"2026-10-25":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"other","min":110,"mi":5.0}],"punched":true},"2026-10-26":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"strength","min":40},{"a":"run","min":38,"mi":4.0}],"punched":true}},"week":{"2":[{"a":"pilates","min":50}],"4":[{"a":"climb","min":75}],"0":[{"a":"bike","min":90}]}},"footer":""},"race":{"today":"2027-03-21","start":"2026-09-28","race":"2027-03-21","raceName":"race day","week":24,"garmin":{"2027-03-21":[{"a":"run","min":262,"mi":26.2}]},"plan":{"2026-09-28":[{"a":"run","min":60}],"2026-09-30":[{"a":"run","min":60}],"2026-10-03":[{"a":"run","mi":7,"min":70}],"2026-10-04":[{"a":"run","min":60}],"2026-10-05":[{"a":"run","mi":3,"min":30}],"2026-10-06":[{"a":"run","min":60}],"2026-10-07":[{"a":"run","mi":4,"min":40}],"2026-10-08":[{"a":"run","mi":4,"min":40}],"2026-10-10":[{"a":"run","mi":10,"min":100}],"2026-10-11":[{"a":"run","mi":3,"min":30}],"2026-10-12":[{"a":"run","mi":3,"min":30}],"2026-10-13":[{"a":"run","min":60}],"2026-10-14":[{"a":"run","mi":4,"min":40}],"2026-10-15":[{"a":"run","mi":4,"min":40}],"2026-10-17":[{"a":"run","mi":12,"min":120}],"2026-10-18":[{"a":"run","mi":3,"min":30}],"2026-10-19":[{"a":"run","mi":4,"min":40}],"2026-10-20":[{"a":"run","min":60}],"2026-10-21":[{"a":"run","mi":5,"min":50}],"2026-10-22":[{"a":"run","mi":5,"min":50}],"2026-10-24":[{"a":"run","mi":12,"min":120}],"2026-10-25":[{"a":"run","mi":4,"min":40}],"2026-10-26":[{"a":"run","mi":4,"min":40}],"2026-10-27":[{"a":"run","min":60}],"2026-10-28":[{"a":"run","mi":5,"min":50}],"2026-10-29":[{"a":"run","mi":6,"min":60}],"2026-10-31":[{"a":"run","mi":14,"min":140}],"2026-11-01":[{"a":"run","mi":4,"min":40}],"2026-11-02":[{"a":"run","mi":5,"min":50}],"2026-11-03":[{"a":"run","min":60}],"2026-11-04":[{"a":"run","mi":6,"min":60}],"2026-11-05":[{"a":"run","mi":6,"min":60}],"2026-11-07":[{"a":"run","mi":14,"min":140}],"2026-11-08":[{"a":"run","mi":5,"min":50}],"2026-11-09":[{"a":"run","mi":3,"min":30}],"2026-11-10":[{"a":"run","min":60}],"2026-11-11":[{"a":"run","mi":5,"min":50}],"2026-11-12":[{"a":"run","mi":5,"min":50}],"2026-11-14":[{"a":"run","mi":10,"min":100}],"2026-11-15":[{"a":"run","mi":4,"min":40}],"2026-11-16":[{"a":"run","mi":5,"min":50}],"2026-11-17":[{"a":"run","min":60}],"2026-11-18":[{"a":"run","mi":6,"min":60}],"2026-11-19":[{"a":"run","mi":7,"min":70}],"2026-11-21":[{"a":"run","mi":16,"min":160}],"2026-11-22":[{"a":"run","mi":5,"min":50}],"2026-11-23":[{"a":"run","mi":6,"min":60}],"2026-11-24":[{"a":"run","min":60}],"2026-11-25":[{"a":"run","mi":6,"min":60}],"2026-11-26":[{"a":"run","mi":7,"min":70}],"2026-11-28":[{"a":"run","mi":16,"min":160}],"2026-11-29":[{"a":"run","mi":5,"min":50}],"2026-11-30":[{"a":"run","mi":4,"min":40}],"2026-12-01":[{"a":"run","min":60}],"2026-12-02":[{"a":"run","mi":5,"min":50}],"2026-12-03":[{"a":"run","mi":5,"min":50}],"2026-12-05":[{"a":"run","mi":12,"min":120}],"2026-12-06":[{"a":"run","mi":4,"min":40}],"2026-12-07":[{"a":"run","mi":6,"min":60}],"2026-12-08":[{"a":"run","min":60}],"2026-12-09":[{"a":"run","mi":6,"min":60}],"2026-12-10":[{"a":"run","mi":8,"min":80}],"2026-12-12":[{"a":"run","mi":18,"min":180}],"2026-12-13":[{"a":"run","mi":5,"min":50}],"2026-12-14":[{"a":"run","mi":6,"min":60}],"2026-12-15":[{"a":"run","min":60}],"2026-12-16":[{"a":"run","mi":6,"min":60}],"2026-12-17":[{"a":"run","mi":8,"min":80}],"2026-12-19":[{"a":"run","mi":18,"min":180}],"2026-12-20":[{"a":"run","mi":5,"min":50}],"2026-12-21":[{"a":"run","mi":5,"min":50}],"2026-12-22":[{"a":"run","min":60}],"2026-12-23":[{"a":"run","mi":5,"min":50}],"2026-12-24":[{"a":"run","mi":6,"min":60}],"2026-12-26":[{"a":"run","mi":12,"min":120}],"2026-12-27":[{"a":"run","mi":4,"min":40}],"2026-12-28":[{"a":"run","mi":6,"min":60}],"2026-12-29":[{"a":"run","min":60}],"2026-12-30":[{"a":"run","mi":6,"min":60}],"2026-12-31":[{"a":"run","mi":9,"min":90}],"2027-01-02":[{"a":"run","mi":22,"min":220}],"2027-01-03":[{"a":"run","mi":5,"min":50}],"2027-01-04":[{"a":"run","mi":7,"min":70}],"2027-01-05":[{"a":"run","min":60}],"2027-01-06":[{"a":"run","mi":6,"min":60}],"2027-01-07":[{"a":"run","mi":9,"min":90}],"2027-01-09":[{"a":"run","mi":20,"min":200}],"2027-01-10":[{"a":"run","mi":5,"min":50}],"2027-01-11":[{"a":"run","mi":6,"min":60}],"2027-01-12":[{"a":"run","min":60}],"2027-01-13":[{"a":"run","mi":5,"min":50}],"2027-01-14":[{"a":"run","mi":7,"min":70}],"2027-01-16":[{"a":"run","mi":12,"min":120}],"2027-01-17":[{"a":"run","mi":4,"min":40}],"2027-01-18":[{"a":"run","mi":7,"min":70}],"2027-01-19":[{"a":"run","min":60}],"2027-01-20":[{"a":"run","mi":6,"min":60}],"2027-01-21":[{"a":"run","mi":10,"min":100}],"2027-01-23":[{"a":"run","mi":22,"min":220}],"2027-01-24":[{"a":"run","mi":5,"min":50}],"2027-01-25":[{"a":"run","mi":7,"min":70}],"2027-01-26":[{"a":"run","min":60}],"2027-01-27":[{"a":"run","mi":6,"min":60}],"2027-01-28":[{"a":"run","mi":10,"min":100}],"2027-01-30":[{"a":"run","mi":18,"min":180}],"2027-01-31":[{"a":"run","mi":5,"min":50}],"2027-02-01":[{"a":"run","mi":6,"min":60}],"2027-02-02":[{"a":"run","min":60}],"2027-02-03":[{"a":"run","mi":5,"min":50}],"2027-02-04":[{"a":"run","mi":8,"min":80}],"2027-02-06":[{"a":"run","mi":12,"min":120}],"2027-02-07":[{"a":"run","mi":4,"min":40}],"2027-02-08":[{"a":"run","mi":7,"min":70}],"2027-02-09":[{"a":"run","min":60}],"2027-02-10":[{"a":"run","mi":6,"min":60}],"2027-02-11":[{"a":"run","mi":12,"min":120}],"2027-02-13":[{"a":"run","mi":20,"min":200}],"2027-02-14":[{"a":"run","mi":5,"min":50}],"2027-02-15":[{"a":"run","mi":7,"min":70}],"2027-02-16":[{"a":"run","min":60}],"2027-02-17":[{"a":"run","mi":6,"min":60}],"2027-02-18":[{"a":"run","mi":12,"min":120}],"2027-02-20":[{"a":"run","mi":24,"min":240}],"2027-02-21":[{"a":"run","mi":5,"min":50}],"2027-02-22":[{"a":"run","mi":6,"min":60}],"2027-02-23":[{"a":"run","min":60}],"2027-02-24":[{"a":"run","mi":5,"min":50}],"2027-02-25":[{"a":"run","mi":10,"min":100}],"2027-02-27":[{"a":"run","mi":12,"min":120}],"2027-02-28":[{"a":"run","mi":4,"min":40}],"2027-03-01":[{"a":"run","mi":7,"min":70}],"2027-03-02":[{"a":"run","min":60}],"2027-03-03":[{"a":"run","mi":6,"min":60}],"2027-03-04":[{"a":"run","mi":10,"min":100}],"2027-03-06":[{"a":"run","mi":16,"min":160}],"2027-03-07":[{"a":"run","mi":4,"min":40}],"2027-03-08":[{"a":"run","mi":5,"min":50}],"2027-03-09":[{"a":"run","min":60}],"2027-03-10":[{"a":"run","mi":5,"min":50}],"2027-03-11":[{"a":"run","mi":8,"min":80}],"2027-03-13":[{"a":"run","mi":10,"min":100}],"2027-03-14":[{"a":"run","mi":3,"min":30}],"2027-03-15":[{"a":"run","mi":4,"min":40}],"2027-03-16":[{"a":"run","min":60}],"2027-03-17":[{"a":"run","mi":4,"min":40}],"2027-03-18":[{"a":"run","mi":6,"min":60}],"2027-03-20":[{"a":"run","min":60}]},"state":{"days":{"2026-09-28":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.1,"min":61},{"a":"strength","min":36}],"punched":true},"2026-09-29":{"planned":[],"done":[{"a":"pilates","min":55}],"punched":true},"2026-09-30":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.5,"min":54}],"punched":true},"2026-10-03":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"other","min":44,"mi":3.8}],"punched":true},"2026-10-04":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.3,"min":56},{"a":"bike","min":93},{"a":"pilates","min":11}],"punched":true},"2026-10-05":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"run","mi":3,"min":29},{"a":"strength","min":50}],"punched":true},"2026-10-06":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.1,"min":47},{"a":"pilates","min":43}],"punched":true},"2026-10-07":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":36}],"punched":true},"2026-10-08":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":38}],"punched":true},"2026-10-09":{"planned":[],"done":[{"a":"other","min":60,"mi":3.7}],"punched":true},"2026-10-10":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","mi":10,"min":102}],"punched":true},"2026-10-11":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"run","mi":3,"min":31},{"a":"bike","min":104},{"a":"pilates","min":28}],"punched":true},"2026-10-12":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"run","mi":3,"min":27},{"a":"strength","min":47}],"punched":true},"2026-10-13":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.6,"min":48},{"a":"pilates","min":53}],"punched":true},"2026-10-14":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":42},{"a":"strength","min":35}],"punched":true},"2026-10-15":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":38}],"punched":true},"2026-10-17":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":126}],"punched":true},"2026-10-18":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"run","mi":3,"min":29},{"a":"bike","min":103},{"a":"pilates","min":28}],"punched":true},"2026-10-19":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":39},{"a":"strength","min":35}],"punched":true},"2026-10-20":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.9,"min":60},{"a":"pilates","min":64}],"punched":true},"2026-10-21":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":47}],"punched":true},"2026-10-22":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"climb","min":89}],"punched":true},"2026-10-24":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":109}],"punched":true},"2026-10-25":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":40},{"a":"pilates","min":15}],"punched":true},"2026-10-26":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":40},{"a":"strength","min":45}],"punched":true},"2026-10-27":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.0,"min":62}],"punched":true},"2026-10-28":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":48},{"a":"strength","min":48}],"punched":true},"2026-10-29":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":62}],"punched":true},"2026-10-31":{"planned":[{"a":"run","mi":14,"min":140}],"done":[{"a":"run","mi":14,"min":135}],"punched":true},"2026-11-01":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":36},{"a":"bike","min":84},{"a":"pilates","min":33}],"punched":true},"2026-11-02":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":45}],"punched":true},"2026-11-03":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.7,"min":65},{"a":"pilates","min":51}],"punched":true},"2026-11-04":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":62},{"a":"strength","min":38}],"punched":true},"2026-11-05":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":62},{"a":"climb","min":69}],"punched":true},"2026-11-07":{"planned":[{"a":"run","mi":14,"min":140}],"done":[{"a":"run","mi":14,"min":142}],"punched":true},"2026-11-08":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"bike","min":102}],"punched":true},"2026-11-09":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"run","mi":3,"min":30},{"a":"strength","min":48}],"punched":true},"2026-11-10":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.0,"min":61},{"a":"pilates","min":44}],"punched":true},"2026-11-11":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46}],"punched":true},"2026-11-12":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"climb","min":69}],"punched":true},"2026-11-14":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","mi":10,"min":94}],"punched":true},"2026-11-15":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":42},{"a":"bike","min":87},{"a":"pilates","min":15}],"punched":true},"2026-11-16":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":48},{"a":"strength","min":47}],"punched":true},"2026-11-17":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.8,"min":57},{"a":"pilates","min":41}],"punched":true},"2026-11-18":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":54},{"a":"strength","min":27}],"punched":true},"2026-11-19":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":69},{"a":"climb","min":72}],"punched":true},"2026-11-21":{"planned":[{"a":"run","mi":16,"min":160}],"done":[{"a":"run","mi":16,"min":152}],"punched":true},"2026-11-22":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"bike","min":89},{"a":"pilates","min":19}],"punched":true},"2026-11-23":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":61},{"a":"strength","min":48}],"punched":true},"2026-11-24":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.8,"min":57},{"a":"pilates","min":56}],"punched":true},"2026-11-25":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60},{"a":"strength","min":42}],"punched":true},"2026-11-26":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":69},{"a":"climb","min":71}],"punched":true},"2026-11-28":{"planned":[{"a":"run","mi":16,"min":160}],"done":[{"a":"run","mi":16,"min":168}],"punched":true},"2026-11-29":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46},{"a":"pilates","min":34}],"punched":true},"2026-11-30":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":39},{"a":"strength","min":51}],"punched":true},"2026-12-01":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.3,"min":52},{"a":"pilates","min":52}],"punched":true},"2026-12-02":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"other","min":32,"mi":2.1}],"punched":true},"2026-12-03":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":51},{"a":"climb","min":79}],"punched":true},"2026-12-04":{"planned":[],"done":[{"a":"other","min":55,"mi":2.5}],"punched":true},"2026-12-05":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":119}],"punched":true},"2026-12-06":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":37},{"a":"bike","min":95},{"a":"pilates","min":29}],"punched":true},"2026-12-07":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":61},{"a":"strength","min":54}],"punched":true},"2026-12-08":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.2,"min":61},{"a":"pilates","min":48}],"punched":true},"2026-12-09":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":62},{"a":"strength","min":44}],"punched":true},"2026-12-10":{"planned":[{"a":"run","mi":8,"min":80}],"done":[{"a":"run","mi":8,"min":78},{"a":"climb","min":65}],"punched":true},"2026-12-12":{"planned":[{"a":"run","mi":18,"min":180}],"done":[{"a":"run","mi":18,"min":186}],"punched":true},"2026-12-13":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46},{"a":"pilates","min":29}],"punched":true},"2026-12-14":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":61},{"a":"strength","min":33}],"punched":true},"2026-12-15":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.5,"min":43},{"a":"pilates","min":51}],"punched":true},"2026-12-16":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60},{"a":"strength","min":25}],"punched":true},"2026-12-17":{"planned":[{"a":"run","mi":8,"min":80}],"done":[{"a":"run","mi":8,"min":75},{"a":"climb","min":69}],"punched":true},"2026-12-18":{"planned":[],"done":[{"a":"other","min":62,"mi":2.0}],"punched":true},"2026-12-19":{"planned":[{"a":"run","mi":18,"min":180}],"done":[{"a":"run","mi":18,"min":169}],"punched":true},"2026-12-20":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":52},{"a":"bike","min":93},{"a":"pilates","min":31}],"punched":true},"2026-12-21":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46},{"a":"strength","min":38}],"punched":true},"2026-12-22":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.9,"min":64},{"a":"pilates","min":60}],"punched":true},"2026-12-23":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":50}],"punched":true},"2026-12-24":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":54},{"a":"climb","min":87}],"punched":true},"2026-12-26":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":125}],"punched":true},"2026-12-27":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":42},{"a":"pilates","min":10}],"punched":true},"2026-12-28":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":55},{"a":"strength","min":43}],"punched":true},"2026-12-29":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.1,"min":38},{"a":"pilates","min":57}],"punched":true},"2026-12-30":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":59},{"a":"strength","min":43}],"punched":true},"2026-12-31":{"planned":[{"a":"run","mi":9,"min":90}],"done":[{"a":"run","mi":9,"min":93}],"punched":true},"2027-01-02":{"planned":[{"a":"run","mi":22,"min":220}],"done":[{"a":"run","mi":22,"min":228}],"punched":true},"2027-01-03":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":51}],"punched":true},"2027-01-04":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":69},{"a":"strength","min":45}],"punched":true},"2027-01-05":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.0,"min":55}],"punched":true},"2027-01-06":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60}],"punched":true},"2027-01-07":{"planned":[{"a":"run","mi":9,"min":90}],"done":[{"a":"run","mi":9,"min":90}],"punched":true},"2027-01-09":{"planned":[{"a":"run","mi":20,"min":200}],"done":[{"a":"run","mi":20,"min":191}],"punched":true},"2027-01-10":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46},{"a":"bike","min":88},{"a":"pilates","min":30}],"punched":true},"2027-01-11":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":54}],"punched":true},"2027-01-12":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.8,"min":45}],"punched":true},"2027-01-13":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":48},{"a":"strength","min":32}],"punched":true},"2027-01-14":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":63},{"a":"climb","min":82}],"punched":true},"2027-01-15":{"planned":[],"done":[{"a":"other","min":41,"mi":1.6}],"punched":true},"2027-01-16":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":117}],"punched":true},"2027-01-17":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":39},{"a":"pilates","min":11}],"punched":true},"2027-01-18":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":71},{"a":"strength","min":47}],"punched":true},"2027-01-19":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.3,"min":41}],"punched":true},"2027-01-20":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60},{"a":"strength","min":36}],"punched":true},"2027-01-21":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","mi":10,"min":94}],"punched":true},"2027-01-23":{"planned":[{"a":"run","mi":22,"min":220}],"done":[{"a":"run","mi":22,"min":204}],"punched":true},"2027-01-24":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":49},{"a":"bike","min":87},{"a":"pilates","min":27}],"punched":true},"2027-01-25":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":68},{"a":"strength","min":41}],"punched":true},"2027-01-26":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.7,"min":47},{"a":"pilates","min":61}],"punched":true},"2027-01-27":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":57}],"punched":true},"2027-01-28":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"climb","min":83}],"punched":true},"2027-01-29":{"planned":[],"done":[{"a":"other","min":43,"mi":3.4}],"punched":true},"2027-01-30":{"planned":[{"a":"run","mi":18,"min":180}],"done":[{"a":"run","mi":18,"min":176}],"punched":true},"2027-01-31":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":52},{"a":"bike","min":85}],"punched":true},"2027-02-01":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60},{"a":"strength","min":54}],"punched":true},"2027-02-02":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.6,"min":43},{"a":"pilates","min":47}],"punched":true},"2027-02-03":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":47},{"a":"strength","min":39}],"punched":true},"2027-02-04":{"planned":[{"a":"run","mi":8,"min":80}],"done":[{"a":"run","mi":8,"min":81},{"a":"climb","min":79}],"punched":true},"2027-02-05":{"planned":[],"done":[{"a":"other","min":38,"mi":3.3}],"punched":true},"2027-02-06":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":115}],"punched":true},"2027-02-07":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":36},{"a":"bike","min":98},{"a":"pilates","min":24}],"punched":true},"2027-02-08":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":65},{"a":"strength","min":55}],"punched":true},"2027-02-09":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.0,"min":54},{"a":"pilates","min":44}],"punched":true},"2027-02-10":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":58},{"a":"strength","min":45}],"punched":true},"2027-02-11":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":121}],"punched":true},"2027-02-13":{"planned":[{"a":"run","mi":20,"min":200}],"done":[{"a":"run","mi":20,"min":200}],"punched":true},"2027-02-14":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":48},{"a":"pilates","min":29}],"punched":true},"2027-02-15":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":72}],"punched":true},"2027-02-16":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.9,"min":54},{"a":"pilates","min":48}],"punched":true},"2027-02-17":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60},{"a":"strength","min":41}],"punched":true},"2027-02-18":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":117},{"a":"climb","min":71}],"punched":true},"2027-02-20":{"planned":[{"a":"run","mi":24,"min":240}],"done":[{"a":"run","mi":24,"min":249}],"punched":true},"2027-02-21":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":45},{"a":"bike","min":89}],"punched":true},"2027-02-22":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":58}],"punched":true},"2027-02-23":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":6.0,"min":54},{"a":"pilates","min":59}],"punched":true},"2027-02-24":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":49},{"a":"strength","min":42}],"punched":true},"2027-02-25":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","mi":10,"min":100},{"a":"climb","min":76}],"punched":true},"2027-02-27":{"planned":[{"a":"run","mi":12,"min":120}],"done":[{"a":"run","mi":12,"min":116}],"punched":true},"2027-02-28":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":40},{"a":"bike","min":94},{"a":"pilates","min":10}],"punched":true},"2027-03-01":{"planned":[{"a":"run","mi":7,"min":70}],"done":[{"a":"run","mi":7,"min":72},{"a":"strength","min":54}],"punched":true},"2027-03-02":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.7,"min":52},{"a":"pilates","min":45}],"punched":true},"2027-03-03":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"strength","min":47}],"punched":true},"2027-03-04":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","mi":10,"min":93}],"punched":true},"2027-03-06":{"planned":[{"a":"run","mi":16,"min":160}],"done":[{"a":"run","mi":16,"min":159}],"punched":true},"2027-03-07":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":37},{"a":"pilates","min":13}],"punched":true},"2027-03-08":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46}],"punched":true},"2027-03-09":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.6,"min":42},{"a":"pilates","min":47}],"punched":true},"2027-03-10":{"planned":[{"a":"run","mi":5,"min":50}],"done":[{"a":"run","mi":5,"min":46}],"punched":true},"2027-03-11":{"planned":[{"a":"run","mi":8,"min":80}],"done":[{"a":"run","mi":8,"min":82},{"a":"climb","min":86}],"punched":true},"2027-03-12":{"planned":[],"done":[{"a":"other","min":55,"mi":2.3}],"punched":true},"2027-03-13":{"planned":[{"a":"run","mi":10,"min":100}],"done":[{"a":"run","mi":10,"min":104}],"punched":true},"2027-03-14":{"planned":[{"a":"run","mi":3,"min":30}],"done":[{"a":"run","mi":3,"min":31},{"a":"pilates","min":22}],"punched":true},"2027-03-15":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":39}],"punched":true},"2027-03-16":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":4.2,"min":44},{"a":"pilates","min":63}],"punched":true},"2027-03-17":{"planned":[{"a":"run","mi":4,"min":40}],"done":[{"a":"run","mi":4,"min":41},{"a":"strength","min":36}],"punched":true},"2027-03-18":{"planned":[{"a":"run","mi":6,"min":60}],"done":[{"a":"run","mi":6,"min":60},{"a":"climb","min":90}],"punched":true},"2027-03-20":{"planned":[{"a":"run","min":60}],"done":[{"a":"run","mi":5.8,"min":56}],"punched":true}},"week":{"2":[{"a":"pilates","min":50}],"4":[{"a":"climb","min":75}],"0":[{"a":"bike","min":90}]}},"footer":""},"fresh":{"today":"2026-10-31","start":"2026-09-28","race":"2027-03-21","raceName":"race day","week":4,"garmin":{},"plan":{"2026-09-28":[{"a":"run","min":60}],"2026-09-30":[{"a":"run","min":60}],"2026-10-03":[{"a":"run","mi":7,"min":70}],"2026-10-04":[{"a":"run","min":60}],"2026-10-05":[{"a":"run","mi":3,"min":30}],"2026-10-06":[{"a":"run","min":60}],"2026-10-07":[{"a":"run","mi":4,"min":40}],"2026-10-08":[{"a":"run","mi":4,"min":40}],"2026-10-10":[{"a":"run","mi":10,"min":100}],"2026-10-11":[{"a":"run","mi":3,"min":30}],"2026-10-12":[{"a":"run","mi":3,"min":30}],"2026-10-13":[{"a":"run","min":60}],"2026-10-14":[{"a":"run","mi":4,"min":40}],"2026-10-15":[{"a":"run","mi":4,"min":40}],"2026-10-17":[{"a":"run","mi":12,"min":120}],"2026-10-18":[{"a":"run","mi":3,"min":30}],"2026-10-19":[{"a":"run","mi":4,"min":40}],"2026-10-20":[{"a":"run","min":60}],"2026-10-21":[{"a":"run","mi":5,"min":50}],"2026-10-22":[{"a":"run","mi":5,"min":50}],"2026-10-24":[{"a":"run","mi":12,"min":120}],"2026-10-25":[{"a":"run","mi":4,"min":40}],"2026-10-26":[{"a":"run","mi":4,"min":40}],"2026-10-27":[{"a":"run","min":60}],"2026-10-28":[{"a":"run","mi":5,"min":50}],"2026-10-29":[{"a":"run","mi":6,"min":60}],"2026-10-31":[{"a":"run","mi":14,"min":140}],"2026-11-01":[{"a":"run","mi":4,"min":40}],"2026-11-02":[{"a":"run","mi":5,"min":50}],"2026-11-03":[{"a":"run","min":60}],"2026-11-04":[{"a":"run","mi":6,"min":60}],"2026-11-05":[{"a":"run","mi":6,"min":60}],"2026-11-07":[{"a":"run","mi":14,"min":140}],"2026-11-08":[{"a":"run","mi":5,"min":50}],"2026-11-09":[{"a":"run","mi":3,"min":30}],"2026-11-10":[{"a":"run","min":60}],"2026-11-11":[{"a":"run","mi":5,"min":50}],"2026-11-12":[{"a":"run","mi":5,"min":50}],"2026-11-14":[{"a":"run","mi":10,"min":100}],"2026-11-15":[{"a":"run","mi":4,"min":40}],"2026-11-16":[{"a":"run","mi":5,"min":50}],"2026-11-17":[{"a":"run","min":60}],"2026-11-18":[{"a":"run","mi":6,"min":60}],"2026-11-19":[{"a":"run","mi":7,"min":70}],"2026-11-21":[{"a":"run","mi":16,"min":160}],"2026-11-22":[{"a":"run","mi":5,"min":50}],"2026-11-23":[{"a":"run","mi":6,"min":60}],"2026-11-24":[{"a":"run","min":60}],"2026-11-25":[{"a":"run","mi":6,"min":60}],"2026-11-26":[{"a":"run","mi":7,"min":70}],"2026-11-28":[{"a":"run","mi":16,"min":160}],"2026-11-29":[{"a":"run","mi":5,"min":50}],"2026-11-30":[{"a":"run","mi":4,"min":40}],"2026-12-01":[{"a":"run","min":60}],"2026-12-02":[{"a":"run","mi":5,"min":50}],"2026-12-03":[{"a":"run","mi":5,"min":50}],"2026-12-05":[{"a":"run","mi":12,"min":120}],"2026-12-06":[{"a":"run","mi":4,"min":40}],"2026-12-07":[{"a":"run","mi":6,"min":60}],"2026-12-08":[{"a":"run","min":60}],"2026-12-09":[{"a":"run","mi":6,"min":60}],"2026-12-10":[{"a":"run","mi":8,"min":80}],"2026-12-12":[{"a":"run","mi":18,"min":180}],"2026-12-13":[{"a":"run","mi":5,"min":50}],"2026-12-14":[{"a":"run","mi":6,"min":60}],"2026-12-15":[{"a":"run","min":60}],"2026-12-16":[{"a":"run","mi":6,"min":60}],"2026-12-17":[{"a":"run","mi":8,"min":80}],"2026-12-19":[{"a":"run","mi":18,"min":180}],"2026-12-20":[{"a":"run","mi":5,"min":50}],"2026-12-21":[{"a":"run","mi":5,"min":50}],"2026-12-22":[{"a":"run","min":60}],"2026-12-23":[{"a":"run","mi":5,"min":50}],"2026-12-24":[{"a":"run","mi":6,"min":60}],"2026-12-26":[{"a":"run","mi":12,"min":120}],"2026-12-27":[{"a":"run","mi":4,"min":40}],"2026-12-28":[{"a":"run","mi":6,"min":60}],"2026-12-29":[{"a":"run","min":60}],"2026-12-30":[{"a":"run","mi":6,"min":60}],"2026-12-31":[{"a":"run","mi":9,"min":90}],"2027-01-02":[{"a":"run","mi":22,"min":220}],"2027-01-03":[{"a":"run","mi":5,"min":50}],"2027-01-04":[{"a":"run","mi":7,"min":70}],"2027-01-05":[{"a":"run","min":60}],"2027-01-06":[{"a":"run","mi":6,"min":60}],"2027-01-07":[{"a":"run","mi":9,"min":90}],"2027-01-09":[{"a":"run","mi":20,"min":200}],"2027-01-10":[{"a":"run","mi":5,"min":50}],"2027-01-11":[{"a":"run","mi":6,"min":60}],"2027-01-12":[{"a":"run","min":60}],"2027-01-13":[{"a":"run","mi":5,"min":50}],"2027-01-14":[{"a":"run","mi":7,"min":70}],"2027-01-16":[{"a":"run","mi":12,"min":120}],"2027-01-17":[{"a":"run","mi":4,"min":40}],"2027-01-18":[{"a":"run","mi":7,"min":70}],"2027-01-19":[{"a":"run","min":60}],"2027-01-20":[{"a":"run","mi":6,"min":60}],"2027-01-21":[{"a":"run","mi":10,"min":100}],"2027-01-23":[{"a":"run","mi":22,"min":220}],"2027-01-24":[{"a":"run","mi":5,"min":50}],"2027-01-25":[{"a":"run","mi":7,"min":70}],"2027-01-26":[{"a":"run","min":60}],"2027-01-27":[{"a":"run","mi":6,"min":60}],"2027-01-28":[{"a":"run","mi":10,"min":100}],"2027-01-30":[{"a":"run","mi":18,"min":180}],"2027-01-31":[{"a":"run","mi":5,"min":50}],"2027-02-01":[{"a":"run","mi":6,"min":60}],"2027-02-02":[{"a":"run","min":60}],"2027-02-03":[{"a":"run","mi":5,"min":50}],"2027-02-04":[{"a":"run","mi":8,"min":80}],"2027-02-06":[{"a":"run","mi":12,"min":120}],"2027-02-07":[{"a":"run","mi":4,"min":40}],"2027-02-08":[{"a":"run","mi":7,"min":70}],"2027-02-09":[{"a":"run","min":60}],"2027-02-10":[{"a":"run","mi":6,"min":60}],"2027-02-11":[{"a":"run","mi":12,"min":120}],"2027-02-13":[{"a":"run","mi":20,"min":200}],"2027-02-14":[{"a":"run","mi":5,"min":50}],"2027-02-15":[{"a":"run","mi":7,"min":70}],"2027-02-16":[{"a":"run","min":60}],"2027-02-17":[{"a":"run","mi":6,"min":60}],"2027-02-18":[{"a":"run","mi":12,"min":120}],"2027-02-20":[{"a":"run","mi":24,"min":240}],"2027-02-21":[{"a":"run","mi":5,"min":50}],"2027-02-22":[{"a":"run","mi":6,"min":60}],"2027-02-23":[{"a":"run","min":60}],"2027-02-24":[{"a":"run","mi":5,"min":50}],"2027-02-25":[{"a":"run","mi":10,"min":100}],"2027-02-27":[{"a":"run","mi":12,"min":120}],"2027-02-28":[{"a":"run","mi":4,"min":40}],"2027-03-01":[{"a":"run","mi":7,"min":70}],"2027-03-02":[{"a":"run","min":60}],"2027-03-03":[{"a":"run","mi":6,"min":60}],"2027-03-04":[{"a":"run","mi":10,"min":100}],"2027-03-06":[{"a":"run","mi":16,"min":160}],"2027-03-07":[{"a":"run","mi":4,"min":40}],"2027-03-08":[{"a":"run","mi":5,"min":50}],"2027-03-09":[{"a":"run","min":60}],"2027-03-10":[{"a":"run","mi":5,"min":50}],"2027-03-11":[{"a":"run","mi":8,"min":80}],"2027-03-13":[{"a":"run","mi":10,"min":100}],"2027-03-14":[{"a":"run","mi":3,"min":30}],"2027-03-15":[{"a":"run","mi":4,"min":40}],"2027-03-16":[{"a":"run","min":60}],"2027-03-17":[{"a":"run","mi":4,"min":40}],"2027-03-18":[{"a":"run","mi":6,"min":60}],"2027-03-20":[{"a":"run","min":60}]},"state":{"days":{},"week":{"2":[{"a":"pilates","min":50}],"4":[{"a":"climb","min":75}],"0":[{"a":"bike","min":90}]}},"footer":""}};
+// Which demo is open, and anything the visitor punched in it, lives in this browser only.
+const SAVE_KEY = 'punchcard.demo.v1';
+const MODE = (()=>{ try{ return JSON.parse(localStorage.getItem(SAVE_KEY)||'{}').mode||'sample'; }catch(e){ return 'sample'; } })();
+const DATA = (()=>{ const d = JSON.parse(JSON.stringify(DEMOS[MODE]||DEMOS.sample));
+  try{ const saved = JSON.parse(localStorage.getItem(SAVE_KEY)||'{}'); if(saved.mode===MODE && saved.days) d.state = {days:saved.days, week:saved.week||d.state.week}; }catch(e){}
+  return d; })();
+(() => {
+  const D = DATA || {today:new Date().toISOString().slice(0,10), start:'2026-09-28', race:'2027-03-21', raceName:'Race', week:null, garmin:{}, plan:{}, state:{days:{},week:{}}, footer:''};
+  const ACTS = [
+    {k:'run', n:'Run', c:'#DC3F0C', mi:true},
+    {k:'bike', n:'Bike', c:'#1D5FD6', mi:true},
+    {k:'strength', n:'Strength', c:'#7A1E12', mi:false},
+    {k:'pilates', n:'Pilates / Yoga', c:'#C8237A', mi:false},
+    {k:'climb', n:'Climb', c:'#1F7336', mi:false},
+    {k:'other', n:'Other', c:'#8A6200', mi:true, hint:'Walks, hikes, anything else'},
+  ];
+  const A = Object.fromEntries(ACTS.map(a=>[a.k,a]));
+  const PAPER = {8:'#ECE4D6',9:'#F4DC2C',10:'#CFE3C9',11:'#CFDDE8',0:'#CFE3C9',1:'#ECE4D6',2:'#F4DC2C'};
+  const CYCLE = ['#ECE4D6','#F4DC2C','#CFE3C9','#CFDDE8'];
+  const NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const INK='#15201A', SLOT='rgba(21,32,26,.07)', HOLE='rgba(21,32,26,.08)';
+  const WD=['Mo','Tu','We','Th','Fr','Sa','Su'], DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], WDI=[1,2,3,4,5,6,0];
+
+  const pad=n=>String(n).padStart(2,'0');
+  const key=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const fromKey=k=>{const [y,m,d]=k.split('-').map(Number);return new Date(y,m-1,d)};
+  const dayDiff=(a,b)=>Math.round((b-a)/864e5);
+  const clone=o=>JSON.parse(JSON.stringify(o));
+  const START=fromKey(D.start), RACE=fromKey(D.race), TODAY=fromKey(D.today), TK=D.today, RK=D.race;
+  const GARMIN=D.garmin||{}, PLAN=D.plan||{};
+
+  const MONTHS=[]; for(let d=new Date(START.getFullYear(),START.getMonth(),1); d<=RACE; d=new Date(d.getFullYear(),d.getMonth()+1,1))
+    MONTHS.push({y:d.getFullYear(), m:d.getMonth(), name:NAMES[d.getMonth()], paper:PAPER[d.getMonth()]||CYCLE[MONTHS.length%4]});
+
+  let days = clone(D.state.days||{}), week = clone(D.state.week||{});
+  let mi = Math.max(0, MONTHS.findIndex(M=>M.y===TODAY.getFullYear()&&M.m===TODAY.getMonth()));
+  if(TODAY>RACE) mi=MONTHS.length-1;
+  let sel = inRange(TODAY)?TK:D.start, mode='day', wday=TODAY.getDay(), draft=null, panelOpen=false;
+
+  function inRange(d){return d>=START && d<=RACE}
+  function planFor(k){
+    const rec=days[k];
+    if(rec && rec.custom) return rec.planned||[];
+    if(k===RK) return [];
+    const base=(PLAN[k]||[]).slice();
+    if(k>=TK) (week[String(fromKey(k).getDay())]||[]).forEach(x=>{ if(x.a!=='run' && !base.some(b=>b.a===x.a)) base.push(x); });
+    return base;
+  }
+  // what a day shows: your record wins; otherwise Garmin fills it in, ready to punch
+  function eff(k){
+    const rec=days[k]||{}, g=GARMIN[k];
+    if(rec.punched || rec.ready) return rec;
+    if(g && g.length) return {...rec, done:g, ready:true, auto:true};
+    return rec;
+  }
+  function status(k){
+    const d=fromKey(k), rec=eff(k);
+    if(!inRange(d)) return 'off';
+    if(rec.punched) return 'punched';
+    if(rec.ready && (rec.done||[]).length) return 'ready';
+    const p=planFor(k).length;
+    if(k>=TK) return p?'planned':'rest';
+    return p?'missed':'rest';
+  }
+
+  // ---------- the mark: size = total time, ring thickness = share of time ----------
+  const mins=x=>Number(x.min)>0?Number(x.min):30;
+  function bands(list){
+    const items=list.slice(0,4), T=items.reduce((s,x)=>s+mins(x),0)||30;
+    const R=Math.max(8.5,Math.min(22.5,8.5+(Math.min(T,150)-20)/130*14));
+    let shares=items.map(x=>Math.max(.16,mins(x)/T)); const sum=shares.reduce((a,b)=>a+b,0); shares=shares.map(s=>s/sum);
+    let r=R; return items.map((x,i)=>{const b={a:x.a,r}; r-=R*shares[i]; return b;});
+  }
+  function mark(k, override){
+    const rec = override || eff(k);
+    const st = override ? (override.plan?'draftplan':'draftdone') : status(k);
+    const s=['<svg viewBox="0 0 48 48" aria-hidden="true">'];
+    const planned = override ? (override.plan?override.planned:[]) : planFor(k);
+    const done = override ? (override.plan?[]:override.done) : (rec.done||[]);
+    const fill = list => bands(list).forEach(b=>s.push(`<circle cx="24" cy="24" r="${b.r.toFixed(2)}" fill="${A[b.a].c}"/>`));
+    const rings = (list,extra='') => bands(list).forEach(b=>s.push(`<circle cx="24" cy="24" r="${Math.max(1.5,b.r-1.25).toFixed(2)}" fill="none" stroke="${A[b.a].c}" stroke-width="2.5" ${extra}/>`));
+    if(st==='off'){
+      s.push('<circle cx="24" cy="24" r="21.5" fill="none" stroke="rgba(21,32,26,.22)" stroke-width="1"/>');
+    } else if(st==='punched' || st==='draftdone'){
+      s.push(`<circle cx="24" cy="24" r="22" fill="${st==='punched'?HOLE:SLOT}"/>`);
+      if(st==='punched') s.push('<path d="M5 19 A19.5 19.5 0 0 1 43 19" fill="none" stroke="rgba(21,32,26,.12)" stroke-width="1"/>');
+      fill(done);
+      if(st==='punched'){
+        const left=(rec.planned||[]).filter(p=>!done.some(d=>d.a===p.a));
+        if(left.length) s.push(`<circle cx="24" cy="24" r="23" fill="none" stroke="${A[left[0].a].c}" stroke-width="1.5" stroke-dasharray="3 2.5"/>`);
+      }
+    } else if(st==='ready'){
+      s.push(`<circle cx="24" cy="24" r="22" fill="${SLOT}"/>`);
+      s.push('<g opacity=".3">'); fill(done); s.push('</g>');
+      s.push(`<circle cx="24" cy="24" r="22.6" fill="none" stroke="${INK}" stroke-width="1.6" stroke-dasharray="3.2 2.6"/>`);
+      s.push(`<circle class="prog" cx="24" cy="24" r="23.6" fill="none" stroke="${INK}" stroke-width="2.8" stroke-dasharray="148.3" stroke-dashoffset="148.3" transform="rotate(-90 24 24)"/>`);
+    } else {
+      s.push(`<circle cx="24" cy="24" r="22" fill="${SLOT}"/>`);
+      if(st==='draftplan'||st==='planned') rings(planned);
+      if(st==='missed') rings(planned,'stroke-dasharray="2 3" opacity=".55"');
+      if(k===RK && !override){
+        s.push(`<circle cx="24" cy="24" r="18" fill="none" stroke="${INK}" stroke-width="2.5"/><circle cx="24" cy="24" r="13" fill="none" stroke="${INK}" stroke-width="1.5"/>`);
+        s.push(`<text x="24" y="28" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="700" font-size="12" fill="${INK}">26.2</text>`);
+      }
+    }
+    if(k===RK && st==='punched') s.push(`<circle cx="24" cy="24" r="23.5" fill="none" stroke="${INK}" stroke-width="1.5"/>`);
+    if(k===TK && !override) s.push(`<circle cx="24" cy="24" r="23.6" fill="none" stroke="${INK}" stroke-width="2.4"/>`);
+    s.push('</svg>'); return s.join('');
+  }
+
+  const fmt=x=>A[x.a].n+(x.mi?` ${x.mi} mi`:'')+(x.min?` ${x.min} min`:'');
+  function describe(k){
+    const rec=eff(k), st=status(k), d=fromKey(k);
+    const date=d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})+(k===TK?', today':'');
+    if(st==='off') return `${date}, outside the plan`;
+    if(st==='punched') return `${date}, punched: ${(rec.done||[]).map(fmt).join(', ')}`;
+    if(st==='ready') return `${date}, ${rec.auto?'from your watch':'saved'}: ${(rec.done||[]).map(fmt).join(', ')}. Press and hold to punch.`;
+    if(st==='planned') return `${date}, planned: ${planFor(k).map(fmt).join(', ')}`;
+    if(st==='missed') return `${date}, planned but not punched`;
+    return `${date}, nothing planned`;
+  }
+  function weekMiles(k){
+    const d=fromKey(k), mon=new Date(d); mon.setDate(d.getDate()-((d.getDay()+6)%7));
+    let mi=0; for(let i=0;i<7;i++){const x=new Date(mon); x.setDate(mon.getDate()+i); const r=eff(key(x)); if(r.punched||r.ready)(r.done||[]).forEach(y=>{if(y.a==='run'&&y.mi)mi+=Number(y.mi)||0})}
+    return {mon, mi:Math.round(mi*10)/10};
+  }
+
+  // ---------- render ----------
+  const $=id=>document.getElementById(id);
+  function render(){
+    const M=MONTHS[mi];
+    document.documentElement.style.setProperty('--paper',M.paper);
+    $('tabs').innerHTML = MONTHS.map((x,i)=>`<button class="tab" type="button" data-i="${i}" aria-current="${i===mi}">${x.name.slice(0,3).toUpperCase()}</button>`).join('');
+    const left=Math.max(0,dayDiff(TODAY,RACE));
+    const wk = D.week==null ? (TODAY<START?'Before the plan':'After the race') : D.week===0 ? 'Warm-up week' : `Week ${D.week} of 24`;
+    $('meta').textContent = `${wk} · ${left} days to go`;
+    const first=new Date(M.y,M.m,1), n=new Date(M.y,M.m+1,0).getDate(), off=(first.getDay()+6)%7;
+    let h=WD.map(w=>`<div class="wd">${w}</div>`).join('');
+    const cells=[]; for(let i=0;i<off;i++) cells.push(null);
+    for(let d=1;d<=n;d++) cells.push(new Date(M.y,M.m,d));
+    while(cells.length%7) cells.push(null);
+    cells.forEach(d=>{
+      if(!d){h+='<div></div>';return}
+      const k=key(d), st=status(k), showSel = k===sel && panelOpen && mode==='day';
+      h+=`<button type="button" class="cell${showSel?' sel':''}" data-k="${k}" ${st==='off'?'disabled':''} aria-label="${describe(k)}"><span class="dot">${mark(k)}</span></button>`;
+    });
+    $('grid').innerHTML=h;
+    $('mo').textContent=M.name;
+    const tst=status(TK);
+    $('logbar').hidden = !inRange(TODAY);
+    $('logbar').innerHTML = tst==='ready' ? '<p class="hint">Press and hold today to punch it</p>' : '<button class="pill" id="logToday" type="button">Log today</button>';
+    fitMonth(); renderPanel();
+    if(Pile) Pile.rebuild(false);
+  }
+  function fitMonth(){
+    const el=$('mo'), w=$('grid').clientWidth;
+    el.style.fontSize='100px'; el.style.maxWidth='none';
+    const natural=el.getBoundingClientRect().width||1; el.style.maxWidth='';
+    el.style.fontSize=Math.min(170, Math.floor(100*w/natural*.995))+'px';
+  }
+
+  function openDraft(){
+    if(mode==='week'){ draft={week:true, wd:wday, plan:true, planned:clone(week[String(wday)]||[])}; return; }
+    const k=sel, rec=eff(k), future=k>TK, punched=!!rec.punched;
+    let done=clone(rec.done||[]);
+    if(!punched && !future && !done.length) done=clone(planFor(k));
+    draft={k, plan:future, punched, ready:!!rec.ready&&!punched, auto:!!rec.auto, planned:clone(planFor(k)), done};
+  }
+  function rowsHTML(list, plannedFor){
+    return ACTS.map(a=>{
+      const p=list.find(x=>x.a===a.k), pl=plannedFor&&plannedFor(a.k);
+      const hint = pl ? `Planned${pl.mi?` · ${pl.mi} mi`:''}${pl.min&&!pl.mi?` · ${pl.min} min`:''}` : (a.hint||'');
+      let r=`<button type="button" class="row" data-a="${a.k}" aria-pressed="${!!p}" style="--c:${a.c}"><span class="sw"></span><span><span class="nm">${a.n}</span>${hint?`<span class="sub">${hint}</span>`:''}</span><span class="check">${p?(draft.plan?'Planned':'Done'):'Add'}</span></button>`;
+      if(p) r+=`<div class="fields"><label for="min-${a.k}">Min <input id="min-${a.k}" data-f="min" data-a="${a.k}" type="number" inputmode="numeric" min="0" step="5" value="${p.min??''}"></label>`+
+        (a.mi?`<label for="mi-${a.k}">Miles <input id="mi-${a.k}" data-f="mi" data-a="${a.k}" type="number" inputmode="decimal" min="0" step="0.1" value="${p.mi??''}"></label>`:'')+`</div>`;
+      return r;
+    }).join('');
+  }
+  function renderPanel(){
+    const P=$('panel');
+    if(!draft || (mode==='week') !== !!draft.week || (mode==='day' && draft.k!==sel) || (mode==='week' && draft.wd!==wday)) openDraft();
+    const err = '';
+    if(mode==='week'){
+      P.className='panel plan'+(panelOpen?' open':'');
+      const chips=WDI.map((g,i)=>`<button type="button" class="wdchip" data-wd="${g}" aria-pressed="${g===wday}">${WD[i]}<i>${(week[String(g)]||[]).slice(0,3).map(x=>`<span style="background:${A[x.a].c}"></span>`).join('')}</i></button>`).join('');
+      P.innerHTML=`<button class="close label" id="close" type="button">Close</button>
+        <div class="ph"><div><h1>Usual week</h1><div class="meta when">The plan sets your runs. Add what else you usually do.</div></div>
+        <div class="preview">${mark(null,{plan:true,planned:draft.planned})}</div></div>
+        <div class="days7">${chips}</div>
+        <p class="ask">A usual ${DOW[wday]}, besides the plan's run</p>
+        <div class="rows">${rowsHTML(draft.planned)}</div>
+        <div class="actions"><button class="pill" id="saveWeek" type="button">Save ${DOW[wday]}</button>${err}</div>`;
+      $('scrim').classList.toggle('on',panelOpen); return;
+    }
+    const k=sel, d=fromKey(k), st=status(k), rec=days[k]||{}, diff=dayDiff(TODAY,d);
+    const when = k===RK?'Race day':diff===0?'Today':diff===1?'Tomorrow':diff===-1?'Yesterday':diff>0?`In ${diff} days`:`${-diff} days ago`;
+    const wm=weekMiles(k), list=draft.plan?draft.planned:draft.done, plan=planFor(k);
+    const plannedFor = (!draft.plan && !draft.punched) ? (a=>plan.find(x=>x.a===a)) : null;
+    const ask = draft.plan ? `Plan for this ${DOW[d.getDay()]}` : draft.punched ? 'Punched. Change anything?'
+      : draft.auto ? 'From your watch. Change anything, then punch it.' : draft.ready ? 'Saved and ready to punch. Change anything?' : 'What did you do?';
+    let primary, secondary='';
+    if(draft.plan){
+      primary=`<button class="pill" id="go" type="button">Save this day</button>`;
+      if(rec.custom) secondary=`<button class="ghost" id="reset" type="button">Back to the plan</button>`;
+    } else if(draft.punched){
+      primary=`<button class="pill" id="go" type="button" ${draft.done.length?'':'disabled'}>Save changes</button>`;
+      secondary=`<button class="ghost" id="unpunch" type="button">Un-punch this day</button>`;
+    } else {
+      primary=`<button class="pill" id="go" type="button" ${draft.done.length?'':'disabled'}>${draft.ready?'Save changes':'Save'}</button>`;
+      if(draft.ready) secondary=`<button class="ghost" id="punchnow" type="button">Punch it now</button>`;
+    }
+    const note = !draft.plan && !draft.punched && !draft.done.length ? '<p class="note">Rest day? Leave it blank.</p>' : '';
+    P.className='panel'+(draft.plan?' plan':' log')+(panelOpen?' open':'');
+    P.innerHTML=`<button class="close label" id="close" type="button">Close</button>
+      <div class="ph"><div><h1>${DOW[d.getDay()]} ${d.toLocaleDateString('en-US',{month:'short'})} ${d.getDate()}</h1>
+        <div class="meta when"><span>${when}${st==='missed'?' · not punched':''}</span><span>Week of ${wm.mon.toLocaleDateString('en-US',{month:'short',day:'numeric'})} · ${wm.mi} run mi</span></div></div>
+      <div class="preview">${mark(k,{planned:draft.planned,done:draft.done,plan:draft.plan})}</div></div>
+      <p class="ask">${ask}</p>
+      <div class="rows">${rowsHTML(list,plannedFor)}</div>
+      <div class="actions">${primary}${secondary}${note}${err}</div>`;
+    $('scrim').classList.toggle('on',panelOpen);
+  }
+
+  // ---------- saving: this browser only ----------
+  function persist(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify({mode:MODE, days, week})); }catch(e){} }
+  function setDay(k,body){
+    const keep=b=>b && ((b.planned||[]).length||(b.done||[]).length||b.punched||b.custom||b.ready);
+    if(keep(body)){ const b={...body}; delete b.auto; days[k]=b; } else delete days[k];
+    persist();
+  }
+  const norm=l=>l.map(x=>{const o={a:x.a}; if(Number(x.min)>0) o.min=Number(x.min); if(Number(x.mi)>0) o.mi=Number(x.mi); return o});
+
+  // ---------- actions ----------
+  let undoState=null, toastT=null;
+  function toast(msg,undo){
+    undoState=undo||null; $('toastMsg').textContent=msg; $('undo').hidden=!undo; $('toast').hidden=false;
+    clearTimeout(toastT); toastT=setTimeout(()=>{$('toast').hidden=true;undoState=null},6000);
+  }
+  const short=k=>fromKey(k).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const closePanel=()=>{panelOpen=false; if(mode==='week'){mode='day'; draft=null;}};
+  const snapshot=k=>days[k]?clone(days[k]):null;
+  const restore=(k,prev)=>()=>{ if(prev) days[k]=prev; else delete days[k]; persist(); draft=null; render(); };
+
+  function saveReady(){
+    const k=sel, prev=snapshot(k);
+    setDay(k,{planned:clone(planFor(k)), custom:!!days[k]?.custom, done:norm(draft.done), punched:false, ready:true});
+    draft=null; closePanel(); render();
+    toast(`Saved. Now press and hold ${k===TK?'today':short(k)} to punch it.`, restore(k,prev));
+  }
+  function punch(k){
+    const prev=snapshot(k), e=eff(k);
+    const rect=document.querySelector(`.cell[data-k="${k}"] .dot`)?.getBoundingClientRect();
+    if(Pile) Pile.skip=k;
+    setDay(k,{planned:clone(planFor(k)), custom:!!days[k]?.custom, done:clone(e.done||[]), punched:true});
+    draft=null; closePanel(); render();
+    if(Pile && rect){ Pile.drop(k,rect); if(k===RK) Pile.explode(rect); } else animatePunch(k);
+    toast(k===RK ? `26.2. Every workout since ${short(D.start)}.` : `Punched ${short(k)}`, restore(k,prev));
+  }
+  function animatePunch(k){
+    const cell=document.querySelector(`.cell[data-k="${k}"] .dot`); if(!cell||matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    const disc=document.createElement('span'); disc.className='disc'; disc.style.background=MONTHS[mi].paper; cell.appendChild(disc);
+    disc.animate([{transform:'none',opacity:1},{transform:'scale(.9)',opacity:1,offset:.22},{transform:'translateY(70%) scale(.72) rotate(28deg)',opacity:0}],{duration:380}).onfinish=()=>disc.remove();
+  }
+
+  document.addEventListener('click',e=>{
+    const t=e.target.closest('button'); if(!t) return;
+    if(t.classList.contains('tab')){ mi=+t.dataset.i; render(); return; }
+    if(t.classList.contains('cell')){
+      if(hold.suppress){ hold.suppress=false; return; }
+      mode='day'; sel=t.dataset.k; draft=null; panelOpen=true; $('toast').hidden=true; render(); return;
+    }
+    if(t.classList.contains('wdchip')){ wday=+t.dataset.wd; draft=null; renderPanel(); return; }
+    if(t.classList.contains('row')){
+      const a=t.dataset.a, list=draft.plan?draft.planned:draft.done, i=list.findIndex(x=>x.a===a);
+      if(i>=0) list.splice(i,1); else { const pl=(!draft.week&&!draft.plan)?planFor(sel).find(x=>x.a===a):null; list.push(pl?{...pl}:{a}); }
+      renderPanel(); $('panel').querySelector(`.row[data-a="${a}"]`)?.focus({preventScroll:true}); return;
+    }
+    switch(t.id){
+      case 'go':
+        if(draft.plan){ const k=sel, prev=snapshot(k); setDay(k,{...(days[k]||{}),planned:norm(draft.planned),custom:true}); draft=null; closePanel(); render(); toast(`Saved plan for ${short(k)}`,restore(k,prev)); }
+        else if(draft.punched){ const k=sel, prev=snapshot(k); setDay(k,{...days[k],done:norm(draft.done),punched:true}); draft=null; closePanel(); render(); toast(`Saved ${short(k)}`,restore(k,prev)); }
+        else saveReady();
+        break;
+      case 'reset': { const k=sel, prev=snapshot(k); const b={...days[k]}; delete b.custom; b.planned=[]; setDay(k,b); draft=null; render(); toast('Back to the plan',restore(k,prev)); break; }
+      case 'punchnow': punch(sel); break;
+      case 'unpunch': { const k=sel, prev=snapshot(k); setDay(k,{...days[k],punched:false,ready:true}); draft=null; render(); toast(`Un-punched ${short(k)}`,restore(k,prev)); break; }
+      case 'saveWeek': { const prev=clone(week); week[String(wday)]=norm(draft.planned); persist(); draft=null; render(); toast(`Saved your usual ${DOW[wday]}`,()=>{week=prev;persist();draft=null;render()}); break; }
+      case 'usual': mode='week'; wday=TODAY.getDay(); draft=null; panelOpen=true; $('toast').hidden=true; render(); break;
+      case 'close': closePanel(); render(); break;
+      case 'logToday': $('toast').hidden=true; mode='day'; sel=TK; mi=Math.max(0,MONTHS.findIndex(M=>M.y===TODAY.getFullYear()&&M.m===TODAY.getMonth())); draft=null; panelOpen=true; render(); break;
+      case 'undo': if(undoState){undoState(); undoState=null;} $('toast').hidden=true; break;
+    }
+  });
+  $('scrim').addEventListener('click',()=>{closePanel();render()});
+  document.addEventListener('input',e=>{
+    const t=e.target; if(!t.dataset.f||!draft) return;
+    const list=draft.plan?draft.planned:draft.done, x=list.find(y=>y.a===t.dataset.a); if(!x) return;
+    x[t.dataset.f]=t.value;
+    const pv=$('panel').querySelector('.preview');
+    if(pv) pv.innerHTML = draft.week ? mark(null,{plan:true,planned:draft.planned}) : mark(sel,{planned:draft.planned,done:draft.done,plan:draft.plan});
+  });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&panelOpen){closePanel();render()} });
+
+  // ---------- press and hold to punch ----------
+  const HOLD_MS=650, hold={k:null,t0:0,raf:0,suppress:false,svg:null,prog:null};
+  function holdReset(){ cancelAnimationFrame(hold.raf); if(hold.svg) hold.svg.style.transform=''; if(hold.prog) hold.prog.setAttribute('stroke-dashoffset','148.3'); hold.k=hold.svg=hold.prog=null; }
+  function holdTick(){
+    if(!hold.k) return;
+    const p=Math.min(1,(performance.now()-hold.t0)/HOLD_MS), e=1-Math.pow(1-p,2);
+    hold.svg.style.transform=`scale(${1-.14*e})`;
+    if(hold.prog) hold.prog.setAttribute('stroke-dashoffset',String(148.3*(1-p)));
+    if(p>=1){ const k=hold.k; hold.suppress=true; holdReset(); punch(k); return; }
+    hold.raf=requestAnimationFrame(holdTick);
+  }
+  $('grid').addEventListener('pointerdown',e=>{
+    const c=e.target.closest('.cell'); if(!c || status(c.dataset.k)!=='ready') return;
+    askMotion(); hold.k=c.dataset.k; hold.t0=performance.now(); hold.suppress=false;
+    hold.svg=c.querySelector('.dot svg'); hold.prog=c.querySelector('.prog'); hold.raf=requestAnimationFrame(holdTick);
+  });
+  const holdEnd=()=>{ if(!hold.k) return; if(performance.now()-hold.t0>200) hold.suppress=true; holdReset(); };
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>$('grid').addEventListener(ev,holdEnd));
+  $('grid').addEventListener('contextmenu',e=>{ if(e.target.closest('.cell')) e.preventDefault(); });
+
+  // ---------- the pile: punched pieces fall and collect at the bottom of the month ----------
+  function askMotion(){
+    try{ if(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function' && !askMotion.asked){ askMotion.asked=true; DeviceOrientationEvent.requestPermission().catch(()=>{}); } }catch(e){}
+  }
+  const Pile = (()=>{
+    const MJ=window.Matter; if(!MJ) return null;
+    const {Engine,Bodies,Composite,Body,Query,Constraint,Sleeping}=MJ;
+    const engine=Engine.create({enableSleeping:true});
+    const cv=$('pile'), ctx=cv.getContext('2d'), sheet=$('sheet');
+    let walls=[], pieces=[], sig='', W=0, H=0, floorY=0, dpr=1, running=false, last=0, drag=null;
+    const api={skip:null};
+    const dotW=()=>{const d=document.querySelector('.cell .dot'); return d?d.clientWidth:44;};
+    const punchedKeys=()=>Object.keys(days).filter(k=>days[k].punched&&(days[k].done||[]).length).sort();
+    const raceDone=()=>!!(days[RK]&&days[RK].punched);
+    const raceMonth=()=>MONTHS[mi].y===RACE.getFullYear()&&MONTHS[mi].m===RACE.getMonth();
+    // each month shows its own pieces; once race day is punched, race month keeps the whole season
+    function keysFor(){ if(raceDone()&&raceMonth()) return punchedKeys(); const M=MONTHS[mi], pre=`${M.y}-${pad(M.m+1)}-`; return punchedKeys().filter(k=>k.startsWith(pre)); }
+    function bounds(){
+      const nav=document.querySelector('nav');
+      W=window.innerWidth; H=window.innerHeight; floorY=Math.round(nav?Math.min(H,nav.getBoundingClientRect().top):H);
+      dpr=window.devicePixelRatio||1; cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px';
+      Composite.remove(engine.world,walls); const t=400;
+      walls=[Bodies.rectangle(W/2,floorY+t/2,W+2*t,t,{isStatic:true,friction:.8}), Bodies.rectangle(W/2,-t/2,W+2*t,t,{isStatic:true}),
+             Bodies.rectangle(-t/2,H/2,t,H*3,{isStatic:true}), Bodies.rectangle(W+t/2,H/2,t,H*3,{isStatic:true})];
+      Composite.add(engine.world,walls);
+    }
+    function piece(k,scale){ const b=bands(days[k].done||[]); if(!b.length) return null; const s=dotW()/48*(scale||1); return {k, bands:b.map(x=>({c:A[x.a].c,r:x.r*s})), r:b[0].r*s}; }
+    const pileScale=()=>raceDone()&&raceMonth()?.64:1;
+    function body(p,x,y){ const b=Bodies.circle(x,y,p.r,{restitution:.18,friction:.6,frictionStatic:.9,frictionAir:.015,density:.0016,slop:.03}); b.piece=p; return b; }
+    function signature(keys){ return [mi,W,H,floorY,dotW(),keys.join(',')].join('|'); }
+    api.rebuild=function(force){
+      bounds();
+      const keys=keysFor().filter(k=>k!==api.skip), s=signature(keys);
+      if(!force && s===sig){ draw(); return; }
+      sig=s; Composite.remove(engine.world,pieces); pieces=[];
+      let seed=(mi+1)*7919; const rnd=()=>((seed=(seed*16807)%2147483647)/2147483647);
+      const gx=engine.gravity.x; engine.gravity.x=0;
+      const sc=pileScale(), steps=keys.length>60?12:45;
+      keys.forEach(k=>{ const p=piece(k,sc); if(!p) return;
+        const b=body(p, p.r+rnd()*Math.max(1,W-2*p.r), floorY-H*.5-rnd()*60);
+        Body.setAngle(b,rnd()*6.28); pieces.push(b); Composite.add(engine.world,b);
+        for(let j=0;j<steps;j++) Engine.update(engine,1000/60); });
+      for(let j=0;j<240;j++) Engine.update(engine,1000/60);
+      engine.gravity.x=gx; draw();
+    };
+    api.drop=function(k,rect){
+      const p=piece(k,pileScale()); api.skip=null; if(!p) return;
+      const b=body(p, rect.left+rect.width/2, rect.top+rect.height/2);
+      Body.setVelocity(b,{x:(Math.random()-.5)*3,y:-2.5}); Body.setAngularVelocity(b,(Math.random()-.5)*.3);
+      pieces.push(b); Composite.add(engine.world,b); sig=signature(keysFor()); kick();
+    };
+    api.explode=function(rect){
+      const keys=punchedKeys().filter(k=>k!==RK), x=rect.left+rect.width/2, y=rect.top+rect.height/2;
+      keys.forEach((k,i)=>setTimeout(()=>{
+        const p=piece(k,.64); if(!p) return;
+        const b=body(p, x+(Math.random()-.5)*10, y+(Math.random()-.5)*10);
+        const ang=-Math.PI/2+(Math.random()-.5)*Math.PI*1.3, sp=9+Math.random()*13;
+        Body.setVelocity(b,{x:Math.cos(ang)*sp,y:Math.sin(ang)*sp}); Body.setAngularVelocity(b,(Math.random()-.5)*.5);
+        pieces.push(b); Composite.add(engine.world,b); kick();
+      }, i*9));
+      setTimeout(()=>{ sig=signature(keysFor()); }, keys.length*9+50);
+    };
+    function draw(){
+      ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+      pieces.forEach(b=>{ const {x,y}=b.position; ctx.save(); ctx.translate(x,y); ctx.rotate(b.angle);
+        b.piece.bands.forEach(d=>{ ctx.beginPath(); ctx.arc(0,0,d.r,0,Math.PI*2); ctx.fillStyle=d.c; ctx.fill(); });
+        ctx.beginPath(); ctx.arc(0,0,Math.max(1,b.piece.r-.8),-2.5,-.6); ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=1; ctx.stroke();
+        ctx.beginPath(); ctx.arc(0,0,Math.max(1,b.piece.r-.6),.6,2.5); ctx.strokeStyle='rgba(21,32,26,.18)'; ctx.stroke();
+        ctx.restore(); });
+    }
+    function frame(t){ if(!running) return; const dt=last?Math.min(33,t-last):16; last=t; Engine.update(engine,dt); draw();
+      if(pieces.some(b=>!b.isSleeping)||drag) requestAnimationFrame(frame); else { running=false; last=0; } }
+    function kick(){ if(!running){ running=true; last=0; requestAnimationFrame(frame); } }
+    api.tilt=function(gx,gy){ gy=gy==null?1:gy; if(Math.abs(engine.gravity.x-gx)<.03&&Math.abs(engine.gravity.y-gy)<.03) return; engine.gravity.x=gx; engine.gravity.y=gy; pieces.forEach(b=>Sleeping.set(b,false)); kick(); };
+    const pt=e=>({x:e.clientX,y:e.clientY});
+    document.addEventListener('pointerdown',e=>{
+      if(e.target.closest('button,a,.panel,input')) return;
+      const q=Query.point(pieces,pt(e))[0]; if(!q) return;
+      drag=Constraint.create({pointA:pt(e),bodyB:q,pointB:{x:0,y:0},stiffness:.08,damping:.1,length:0});
+      Composite.add(engine.world,drag); Sleeping.set(q,false); kick();
+      try{ document.documentElement.setPointerCapture(e.pointerId); }catch(_){}
+    });
+    document.addEventListener('pointermove',e=>{ if(drag) drag.pointA=pt(e); });
+    const up=()=>{ if(drag){ Composite.remove(engine.world,drag); drag=null; } };
+    document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up);
+    addEventListener('resize',()=>{ fitMonth(); api.rebuild(true); });
+    return api;
+  })();
+  // Tilt: phones only share motion after a tap asks for it (iPhone), and only on a real https page.
+  let motionSeen=false;
+  const clamp1=v=>Math.max(-1,Math.min(1,v));
+  addEventListener('deviceorientation',e=>{ if(e.gamma==null) return; motionSeen=true; if(Pile) Pile.tilt(clamp1(e.gamma/25), clamp1((e.beta==null?90:e.beta)/35)); });
+  const tiltBtn=$('tiltbtn');
+  if(Pile && 'DeviceOrientationEvent' in window && matchMedia('(pointer:coarse)').matches) tiltBtn.hidden=false;
+  tiltBtn.onclick=async()=>{
+    let answer='granted';
+    try{ if(typeof DeviceOrientationEvent.requestPermission==='function') answer=await DeviceOrientationEvent.requestPermission(); }catch(e){ answer='error'; }
+    if(answer!=='granted'){ toast('Motion is off for this page. You can turn it on in Safari settings, or drag the pieces instead.'); return; }
+    setTimeout(()=>{
+      if(motionSeen){ tiltBtn.textContent='Tilt on'; tiltBtn.disabled=true; toast('Tilt is on. Tip your phone any way.'); }
+      else toast("This browser isn't sharing motion with the page. You can still drag the pieces.");
+    },1200);
+  };
+  // On a laptop, hold the left or right arrow to tip the pile.
+  const keysDown=new Set(), TILT={ArrowLeft:[-.9,0],ArrowRight:[.9,0],ArrowUp:[0,-1.8],ArrowDown:[0,0]};
+  const keyTilt=()=>{ let x=0,y=1; keysDown.forEach(k=>{x+=TILT[k][0]; y+=TILT[k][1];}); Pile.tilt(clamp1(x),clamp1(y)); };
+  addEventListener('keydown',e=>{ if(!Pile||panelOpen||!TILT[e.key]||e.repeat) return; e.preventDefault(); keysDown.add(e.key); keyTilt(); });
+  addEventListener('keyup',e=>{ if(Pile&&keysDown.delete(e.key)) keyTilt(); });
+
+  // ---------- demo switcher ----------
+  document.querySelectorAll('nav [data-mode]').forEach(btn=>{
+    if(btn.dataset.mode===MODE) btn.setAttribute('aria-current','page');
+    btn.onclick=()=>{ try{ localStorage.setItem(SAVE_KEY, JSON.stringify({mode:btn.dataset.mode})); }catch(e){} location.reload(); };
+  });
+  if(MODE==='race') setTimeout(()=>{ if(status(RK)==='ready') toast('Race day. Press and hold the 21st.'); }, 900);
+
+  render();
+  document.fonts && document.fonts.ready.then(()=>{ fitMonth(); if(Pile) Pile.rebuild(true); });
+})();
+</script></body></html>
